@@ -15,10 +15,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # Check out this repository (github-stats) under $GITHUB_WORKSPACE
+    # Check out repository under $GITHUB_WORKSPACE, so the job can access it
     - uses: actions/checkout@v3
 
-    # Set up Python 3.8
+    # Run using Python 3.8 for consistency and aiohttp
     - name: Set up Python 3.8
       uses: actions/setup-python@v4
       with:
@@ -26,7 +26,7 @@ jobs:
         architecture: 'x64'
         cache: 'pip'
 
-    # Install dependencies with pip
+    # Install dependencies with `pip`
     - name: Install requirements
       run: |
         python3 -m pip install --upgrade pip setuptools wheel
@@ -44,39 +44,12 @@ jobs:
         EXCLUDED_LANGS: ${{ secrets.EXCLUDED_LANGS }}
         EXCLUDE_FORKED_REPOS: true
 
-    # Commit generated files to github-stats repository
+    # Commit all changed files to the repository
     - name: Commit to the repo
       run: |
         git config --global user.name "jstrieb/github-stats"
         git config --global user.email "github-stats[bot]@jstrieb.github.io"
         git add .
+        # Force the build to succeed, even if no files were changed
         git commit -m 'Update generated files' || true
-        git push
-
-    # ---------------------------
-    # New steps to update public repo
-    # ---------------------------
-
-    # Check out the target repository (e.g., your saikiransomanagoudar repo)
-    - name: Checkout target repository
-      uses: actions/checkout@v3
-      with:
-        repository: saikiransomanagoudar/saikiransomanagoudar
-        token: ${{ secrets.ACCESS_TOKEN }}
-        path: target_repo
-
-    # Copy the generated SVG files to the target repository's "generated" folder
-    - name: Copy SVG files to target repository
-      run: |
-        mkdir -p target_repo/generated
-        cp -r generated/* target_repo/generated/
-
-    # Commit and push changes in the target repository
-    - name: Commit and push changes in target repository
-      working-directory: target_repo
-      run: |
-        git config user.name "github-stats"
-        git config user.email "github-stats[bot]@jstrieb.github.io"
-        git add .
-        git commit -m "Update generated stats images" || echo "No changes to commit"
         git push
