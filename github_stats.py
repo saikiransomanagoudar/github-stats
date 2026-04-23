@@ -481,23 +481,76 @@ Languages:
         """
         if self._lines_changed is not None:
             return self._lines_changed
+
+        async def fallback_from_commits(repo_name: str) -> Tuple[int, int]:
+            """
+            Fallback for repos where contributor stats are unavailable.
+            Computes totals from commit-level stats for commits authored by user.
+            """
+            repo_additions = 0
+            repo_deletions = 0
+            page = 1
+            while True:
+                commits = await self.queries.query_rest(
+                    f"/repos/{repo_name}/commits",
+                    params={"author": self.username, "per_page": 100, "page": page},
+                )
+                if not isinstance(commits, list) or len(commits) == 0:
+                    break
+
+                for commit in commits:
+                    if not isinstance(commit, dict):
+                        continue
+                    sha = commit.get("sha", "")
+                    if not sha:
+                        continue
+                    commit_details = await self.queries.query_rest(
+                        f"/repos/{repo_name}/commits/{sha}"
+                    )
+                    if not isinstance(commit_details, dict):
+                        continue
+                    stats = commit_details.get("stats", {})
+                    if not isinstance(stats, dict):
+                        continue
+                    repo_additions += int(stats.get("additions", 0) or 0)
+                    repo_deletions += int(stats.get("deletions", 0) or 0)
+
+                if len(commits) < 100:
+                    break
+                page += 1
+
+            return repo_additions, repo_deletions
+
         additions = 0
         deletions = 0
+        username = self.username.strip().lower()
         for repo in await self.repos:
-            r = await self.queries.query_rest(f"/repos/{repo}/stats/contributors")
-            for author_obj in r:
-                # Handle malformed response from the API by skipping this repo
-                if not isinstance(author_obj, dict) or not isinstance(
-                    author_obj.get("author", {}), dict
-                ):
-                    continue
-                author = author_obj.get("author", {}).get("login", "")
-                if author != self.username:
-                    continue
+            contributor_stats = await self.queries.query_rest(
+                f"/repos/{repo}/stats/contributors"
+            )
 
-                for week in author_obj.get("weeks", []):
-                    additions += week.get("a", 0)
-                    deletions += week.get("d", 0)
+            matched_author = False
+            if isinstance(contributor_stats, list):
+                for author_obj in contributor_stats:
+                    if not isinstance(author_obj, dict) or not isinstance(
+                        author_obj.get("author", {}), dict
+                    ):
+                        continue
+                    author = str(author_obj.get("author", {}).get("login", "")).strip().lower()
+                    if author != username:
+                        continue
+
+                    matched_author = True
+                    for week in author_obj.get("weeks", []):
+                        if not isinstance(week, dict):
+                            continue
+                        additions += int(week.get("a", 0) or 0)
+                        deletions += int(week.get("d", 0) or 0)
+
+            if not matched_author:
+                repo_additions, repo_deletions = await fallback_from_commits(repo)
+                additions += repo_additions
+                deletions += repo_deletions
 
         self._lines_changed = (additions, deletions)
         return self._lines_changed
